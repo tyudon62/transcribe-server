@@ -64,6 +64,52 @@ def transcribe():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/transcribe-audio', methods=['POST'])
+def transcribe_audio():
+    """音声ファイルを受信して文字起こしを実行"""
+    try:
+        if 'audio' not in request.files:
+            return jsonify({'success': False, 'error': 'No audio file provided'}), 400
+
+        audio_file = request.files['audio']
+        if audio_file.filename == '':
+            return jsonify({'success': False, 'error': 'No audio file selected'}), 400
+
+        # 一時ファイルとして保存
+        temp_webm = f"/tmp/{os.urandom(8).hex()}.webm"
+        temp_mp3 = f"/tmp/{os.urandom(8).hex()}.mp3"
+
+        audio_file.save(temp_webm)
+
+        # webmをmp3に変換（Whisper APIは一部のフォーマットのみサポート）
+        try:
+            subprocess.run([
+                'ffmpeg', '-i', temp_webm,
+                '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k',
+                temp_mp3, '-y'
+            ], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            os.remove(temp_webm)
+            return jsonify({'success': False, 'error': f'Audio conversion failed: {e.stderr.decode()}'})
+
+        os.remove(temp_webm)
+
+        # Whisper APIで文字起こし
+        client = get_openai_client()
+        with open(temp_mp3, 'rb') as f:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                language="ja",
+                response_format="text"
+            )
+
+        os.remove(temp_mp3)
+        return jsonify({'success': True, 'transcript': transcript})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
