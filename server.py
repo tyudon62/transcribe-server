@@ -26,42 +26,26 @@ def transcribe():
         audio_path = f"/tmp/{os.urandom(8).hex()}.mp3"
 
         if method == 'ffmpeg':
-            # ffmpegコマンドを構築
             cmd = ['ffmpeg']
-
-            # リファラーがあれば追加
             if referer:
                 cmd.extend(['-headers', f'Referer: {referer}\r\n'])
-
-            # Cookieがあれば追加
             if cookies:
                 cmd.extend(['-headers', f'Cookie: {cookies}\r\n'])
-
-            # 25MB制限対策: 64kbps mono で圧縮
             cmd.extend(['-i', url, '-vn', '-ac', '1', '-ar', '16000',
                 '-b:a', '64k', audio_path, '-y'])
-
             subprocess.run(cmd, check=True, capture_output=True)
         else:
-            # yt-dlpの場合
             output_template = audio_path.replace('.mp3', '')
             cmd = ['yt-dlp', '-x', '--audio-format', 'mp3']
-
-            # リファラーがあれば追加
             if referer:
                 cmd.extend(['--referer', referer])
-
-            # Cookieがあれば一時ファイルに書き出して使用
             if cookies:
                 cookie_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
                 cookie_file.write(cookies)
                 cookie_file.close()
                 cmd.extend(['--cookies', cookie_file.name])
-
             cmd.extend(['-o', f'{output_template}.%(ext)s', url])
             subprocess.run(cmd, check=True, capture_output=True)
-
-            # 一時Cookieファイルを削除
             if cookies and os.path.exists(cookie_file.name):
                 os.remove(cookie_file.name)
 
