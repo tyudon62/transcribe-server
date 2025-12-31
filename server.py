@@ -23,13 +23,12 @@ def transcribe():
         audio_path = f"/tmp/{os.urandom(8).hex()}.mp3"
 
         if method == 'ffmpeg':
-            # 25MB制限対策: 64kbps mono で圧縮（約50分まで対応可能）
+            # 25MB制限対策: 64kbps mono で圧縮
             subprocess.run([
                 'ffmpeg', '-i', url, '-vn', '-ac', '1', '-ar', '16000',
                 '-b:a', '64k', audio_path, '-y'
             ], check=True, capture_output=True)
         else:
-            # yt-dlpは拡張子を自動で付けるので、テンプレートを調整
             output_template = audio_path.replace('.mp3', '')
             subprocess.run([
                 'yt-dlp', '-x', '--audio-format', 'mp3',
