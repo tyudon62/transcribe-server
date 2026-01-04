@@ -4,7 +4,6 @@ import subprocess
 import os
 import tempfile
 import glob
-from openai import OpenAI
 
 app = Flask(__name__)
 CORS(app)
@@ -14,11 +13,21 @@ MAX_FILE_SIZE = 25 * 1024 * 1024
 # 分割時のセグメント長（秒）- 10分ごとに分割
 SEGMENT_DURATION = 600
 
-def get_openai_client():
-    api_key = os.environ.get('OPENAI_API_KEY')
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is not set")
-    return OpenAI(api_key=api_key)
+def get_whisper_client():
+    """Groq優先、なければOpenAIを使用"""
+    groq_key = os.environ.get('GROQ_API_KEY')
+    if groq_key:
+        from groq import Groq
+        print("[client] Groq API を使用（高速モード）")
+        return Groq(api_key=groq_key), 'groq'
+    
+    openai_key = os.environ.get('OPENAI_API_KEY')
+    if openai_key:
+        from openai import OpenAI
+        print("[client] OpenAI API を使用")
+        return OpenAI(api_key=openai_key), 'openai'
+    
+    raise ValueError("GROQ_API_KEY または OPENAI_API_KEY が必要です")
 
 def cleanup_files(*paths):
     """一時ファイルを安全に削除"""
@@ -87,15 +96,18 @@ def split_audio_for_whisper(audio_path, base_name):
 
     return segments if segments else [audio_path]
 
-def transcribe_with_whisper(audio_paths, client, response_format="srt"):
+def transcribe_with_whisper(audio_paths, client, client_type, response_format="srt"):
     """複数の音声ファイルを文字起こしして結合"""
     all_transcripts = []
+    
+    # Groqはwhisper-large-v3、OpenAIはwhisper-1
+    model = "whisper-large-v3" if client_type == 'groq' else "whisper-1"
 
     for i, path in enumerate(audio_paths):
-        print(f"[transcribe_with_whisper] セグメント {i+1}/{len(audio_paths)}: {path}")
+        print(f"[transcribe_with_whisper] セグメント {i+1}/{len(audio_paths)}: {path} ({client_type}, {model})")
         with open(path, 'rb') as f:
             transcript = client.audio.transcriptions.create(
-                model="whisper-1",
+                model=model,
                 file=f,
                 language="ja",
                 response_format=response_format
@@ -194,13 +206,13 @@ def transcribe():
         if len(audio_segments) > 1:
             temp_files.extend(audio_segments)
 
-        # Whisper APIで文字起こし
+        # Whisper APIで文字起こし（Groq優先）
         print(f"[transcribe] Whisper API呼び出し開始 ({len(audio_segments)}セグメント)")
-        client = get_openai_client()
-        transcript = transcribe_with_whisper(audio_segments, client, "srt")
+        client, client_type = get_whisper_client()
+        transcript = transcribe_with_whisper(audio_segments, client, client_type, "srt")
 
-        print(f"[transcribe] 完了: {len(transcript)} 文字")
-        return jsonify({'success': True, 'transcript': transcript})
+        print(f"[transcribe] 完了: {len(transcript)} 文字 (使用: {client_type})")
+        return jsonify({'success': True, 'transcript': transcript, 'provider': client_type})
 
     except subprocess.TimeoutExpired:
         return jsonify({'success': False, 'error': 'Operation timed out (10 min limit)'})
@@ -257,13 +269,13 @@ def transcribe_audio():
         # 長い録音の場合は分割
         audio_segments = split_audio_for_whisper(temp_mp3, base_name)
 
-        # Whisper APIで文字起こし
+        # Whisper APIで文字起こし（Groq優先）
         print(f"[transcribe-audio] Whisper API呼び出し開始 ({len(audio_segments)}セグメント)")
-        client = get_openai_client()
-        transcript = transcribe_with_whisper(audio_segments, client, "text")
+        client, client_type = get_whisper_client()
+        transcript = transcribe_with_whisper(audio_segments, client, client_type, "text")
 
-        print(f"[transcribe-audio] 完了: {len(transcript)} 文字")
-        return jsonify({'success': True, 'transcript': transcript})
+        print(f"[transcribe-audio] 完了: {len(transcript)} 文字 (使用: {client_type})")
+        return jsonify({'success': True, 'transcript': transcript, 'provider': client_type})
 
     except subprocess.TimeoutExpired:
         return jsonify({'success': False, 'error': 'Operation timed out (5 min limit)'})
@@ -279,7 +291,12 @@ def transcribe_audio():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok'})
+    """ヘルスチェック + 使用中のプロバイダーを返す"""
+    try:
+        client, client_type = get_whisper_client()
+        return jsonify({'status': 'ok', 'provider': client_type})
+    except Exception as e:
+        return jsonify({'status': 'ok', 'provider': 'none', 'error': str(e)})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
