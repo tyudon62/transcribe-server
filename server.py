@@ -99,22 +99,28 @@ def split_audio_for_whisper(audio_path, base_name):
 def transcribe_with_whisper(audio_paths, client, client_type, response_format="srt"):
     """複数の音声ファイルを文字起こしして結合"""
     all_transcripts = []
-    
+
     # Groqはwhisper-large-v3、OpenAIはwhisper-1
     model = "whisper-large-v3" if client_type == 'groq' else "whisper-1"
 
+    # Groqはsrt/vttをサポートしていないのでtextを使用
+    actual_format = response_format
+    if client_type == 'groq' and response_format in ['srt', 'vtt']:
+        actual_format = 'text'
+        print(f"[transcribe_with_whisper] Groqはsrt非対応のためtextフォーマットを使用")
+
     for i, path in enumerate(audio_paths):
-        print(f"[transcribe_with_whisper] セグメント {i+1}/{len(audio_paths)}: {path} ({client_type}, {model})")
+        print(f"[transcribe_with_whisper] セグメント {i+1}/{len(audio_paths)}: {path} ({client_type}, {model}, {actual_format})")
         with open(path, 'rb') as f:
             transcript = client.audio.transcriptions.create(
                 model=model,
                 file=f,
                 language="ja",
-                response_format=response_format
+                response_format=actual_format
             )
         all_transcripts.append(transcript)
 
-    # 結合（SRT形式の場合はタイムスタンプの調整が必要だが、簡易的に結合）
+    # 結合
     return "\n\n".join(all_transcripts)
 
 @app.route('/transcribe', methods=['POST'])
