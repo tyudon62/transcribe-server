@@ -9,7 +9,8 @@ ENV DENO_INSTALL="/root/.deno"
 ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 
 # Pythonパッケージをインストール
-RUN pip install yt-dlp openai flask flask-cors
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
 COPY server.py .
 
